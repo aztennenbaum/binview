@@ -72,4 +72,3 @@ All data is normalized to 0-255 for display:
 - Maximum width: 8192 pixels
 - Does not support compressed data
 - Large files load entirely into memory
-- 
