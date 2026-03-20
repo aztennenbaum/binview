@@ -9,7 +9,8 @@ g_fname=None; g_fsize=0; g_photo=None; g_repeat=None
 g_depth=None; g_align=None; g_width=None; g_off=None; g_mode=None
 g_canvas=None; g_status=None; g_flabel=None; g_wentry=None; g_oentry=None
 g_root=None; g_imgw=0; g_imgh=0; g_itemsize=0; g_dtype=None
-g_drag_x=None; g_drag_y=None
+g_drag_x=None; g_drag_y=None; g_autocontrast=None
+g_vmin=None; g_vmax=None; g_vmin_entry=None; g_vmax_entry=None
 g_view_dir=os.path.expanduser("~/.binview")
 
 def ensure_view_dir():
@@ -18,6 +19,16 @@ def ensure_view_dir():
 def file_hash(fpath):
     """Generate hash of filepath for view state filename"""
     return hashlib.sha256(fpath.encode()).hexdigest()[:16]
+
+def get_default_range(dtype):
+    """Get default min/max for data type"""
+    if np.issubdtype(dtype,np.floating):
+        return (0.0,1.0)
+    elif np.issubdtype(dtype,np.signedinteger):
+        inf=np.iinfo(dtype)
+        return (float(inf.min),float(inf.max))
+    else:
+        return (0.0,float(np.iinfo(dtype).max))
 
 def save_view_state():
     """Save current view state for the file"""
@@ -31,6 +42,9 @@ def save_view_state():
             'width': g_width.get(),
             'offset': g_off.get(),
             'mode': g_mode.get(),
+            'autocontrast': g_autocontrast.get(),
+            'vmin': g_vmin.get(),
+            'vmax': g_vmax.get(),
             'scroll_x': g_canvas.canvasx(0),
             'scroll_y': g_canvas.canvasy(0)
         }
@@ -58,6 +72,13 @@ def apply_view_state(state):
         g_width.set(state.get('width',1280))
         g_off.set(state.get('offset',0))
         g_mode.set(state.get('mode','Grayscale'))
+        g_autocontrast.set(state.get('autocontrast',False))
+        # load or compute default range
+        dt=np.dtype(g_depth.get())
+        dmin,dmax=get_default_range(dt)
+        g_vmin.set(state.get('vmin',dmin))
+        g_vmax.set(state.get('vmax',dmax))
+        update_contrast_entries()
         # apply scroll position after image is loaded
         def apply_scroll():
             sx=state.get('scroll_x',0); sy=state.get('scroll_y',0)
@@ -82,11 +103,25 @@ def open_dlg():
     f=filedialog.askopenfilename(title="Select Binary File")
     if f: load_file(f)
 
+def update_contrast_entries():
+    """Update contrast entry boxes from variables"""
+    g_vmin_entry.delete(0,tk.END)
+    g_vmin_entry.insert(0,str(g_vmin.get()))
+    g_vmax_entry.delete(0,tk.END)
+    g_vmax_entry.insert(0,str(g_vmax.get()))
+
 def reload_data():
     global g_imgw,g_imgh,g_itemsize,g_dtype
     if not g_fname: return
     try:
-        a=g_align.get(); g_dtype=np.dtype(g_depth.get()); g_itemsize=g_dtype.itemsize
+        a=g_align.get(); 
+        old_dtype=g_dtype
+        g_dtype=np.dtype(g_depth.get()); g_itemsize=g_dtype.itemsize
+        # reset contrast range if dtype changed
+        if old_dtype!=g_dtype:
+            dmin,dmax=get_default_range(g_dtype)
+            g_vmin.set(dmin); g_vmax.set(dmax)
+            update_contrast_entries()
         w=g_width.get(); o=g_off.get(); m=g_mode.get()
         ch=3 if m=="RGB" else 1
         avail=(g_fsize-a)//g_itemsize
@@ -156,13 +191,23 @@ def update_view(*args):
     if id is None: return
     try:
         # normalize
-        if np.issubdtype(id.dtype,np.floating):
-            id=np.clip(id,0,1)*255
-        elif np.issubdtype(id.dtype,np.signedinteger):
-            inf=np.iinfo(id.dtype)
-            id=((id.astype(np.float64)-inf.min)/(inf.max-inf.min))*255
+        if g_autocontrast.get():
+            # auto: stretch actual min->0, max->255
+            vmin=float(np.min(id)); vmax=float(np.max(id))
+            g_vmin.set(vmin); g_vmax.set(vmax)
+            update_contrast_entries()
+            if vmax>vmin:
+                id=((id.astype(np.float64)-vmin)/(vmax-vmin))*255
+            else:
+                id=np.zeros_like(id,dtype=np.float64)
         else:
-            id=(id.astype(np.float64)/np.iinfo(id.dtype).max)*255
+            # manual: use specified range
+            vmin=g_vmin.get(); vmax=g_vmax.get()
+            if vmax>vmin:
+                id=np.clip(id.astype(np.float64),vmin,vmax)
+                id=((id-vmin)/(vmax-vmin))*255
+            else:
+                id=np.zeros_like(id,dtype=np.float64)
         id=id.astype(np.uint8)
         m=g_mode.get()
         img=Image.fromarray(id,mode='RGB' if m=="RGB" else 'L')
@@ -170,7 +215,8 @@ def update_view(*args):
         g_canvas.delete("all")
         g_canvas.create_image(x0,y0,anchor=tk.NW,image=g_photo,tags="img")
         w=g_width.get(); o=g_off.get(); a=g_align.get()
-        g_status.config(text=f"{g_imgw}x{g_imgh} | view[{x0},{y0}:{x1},{y1}] | {m} | off:{o} | {g_dtype}({g_itemsize}B) | a:{a} | {os.path.basename(g_fname)}")
+        ac=" [AC]" if g_autocontrast.get() else ""
+        g_status.config(text=f"{g_imgw}x{g_imgh} | view[{x0},{y0}:{x1},{y1}]{ac} | {m} | off:{o} | {g_dtype}({g_itemsize}B) | a:{a} | {os.path.basename(g_fname)}")
     except Exception as e: g_status.config(text=f"Error: {e}")
 
 def on_scroll(*args):
@@ -218,6 +264,22 @@ def on_offset_entry(e):
         g_off.set(v); reload_data()
     except: pass
 
+def on_vmin_entry(e):
+    try:
+        v=float(g_vmin_entry.get())
+        g_vmin.set(v)
+        save_view_state()
+        update_view()
+    except: pass
+
+def on_vmax_entry(e):
+    try:
+        v=float(g_vmax_entry.get())
+        g_vmax.set(v)
+        save_view_state()
+        update_view()
+    except: pass
+
 def adj_w(d): 
     v=g_width.get()+d
     if g_fname:
@@ -234,6 +296,10 @@ def adj_o(d):
     avail=(g_fsize-a)//sz
     v=max(0,min(avail-1,v))
     g_off.set(v); reload_data()
+
+def on_autocontrast_toggle():
+    save_view_state()
+    update_view()
 
 def start_rep(f):
     global g_repeat
@@ -259,7 +325,8 @@ def on_closing():
 
 def main():
     global g_depth,g_align,g_width,g_off,g_mode,g_canvas,g_status,g_flabel
-    global g_wentry,g_oentry,g_root
+    global g_wentry,g_oentry,g_root,g_autocontrast,g_vmin,g_vmax
+    global g_vmin_entry,g_vmax_entry
     ensure_view_dir()
     g_root=tk.Tk(); g_root.title("Binary Image Viewer")
     g_root.protocol("WM_DELETE_WINDOW",on_closing)
@@ -283,26 +350,45 @@ def main():
     g_mode=tk.StringVar(value="Grayscale")
     mc=ttk.Combobox(f,textvariable=g_mode,values=["Grayscale","RGB"],state="readonly",width=10)
     mc.pack(side=tk.LEFT,padx=5); mc.bind("<<ComboboxSelected>>",lambda e:reload_data())
+    # contrast controls
+    f=ttk.Frame(g_root); f.pack(side=tk.TOP,fill=tk.X,padx=5,pady=5)
+    g_autocontrast=tk.BooleanVar(value=False)
+    ac=ttk.Checkbutton(f,text="Auto Contrast",variable=g_autocontrast,command=on_autocontrast_toggle)
+    ac.pack(side=tk.LEFT)
+    ttk.Label(f,text="Min:").pack(side=tk.LEFT,padx=(20,0))
+    g_vmin=tk.DoubleVar(value=0.0)
+    g_vmin_entry=ttk.Entry(f,width=15)
+    g_vmin_entry.pack(side=tk.LEFT,padx=5)
+    g_vmin_entry.insert(0,"0.0")
+    g_vmin_entry.bind('<Return>',on_vmin_entry)
+    g_vmin_entry.bind('<FocusOut>',on_vmin_entry)
+    ttk.Label(f,text="Max:").pack(side=tk.LEFT,padx=(10,0))
+    g_vmax=tk.DoubleVar(value=255.0)
+    g_vmax_entry=ttk.Entry(f,width=15)
+    g_vmax_entry.pack(side=tk.LEFT,padx=5)
+    g_vmax_entry.insert(0,"255.0")
+    g_vmax_entry.bind('<Return>',on_vmax_entry)
+    g_vmax_entry.bind('<FocusOut>',on_vmax_entry)
     # width
     f=ttk.Frame(g_root); f.pack(side=tk.TOP,fill=tk.X,padx=5,pady=5)
     ttk.Label(f,text="Width:").pack(side=tk.LEFT)
-    mk_btn(f,"<",lambda:adj_w(-1)); mk_btn(f,"<<",lambda:adj_w(-10))
+    mk_btn(f,"<<",lambda:adj_w(-10)); mk_btn(f,"<",lambda:adj_w(-1))
     g_width=tk.IntVar(value=1280)
     g_wentry=ttk.Entry(f,width=10); g_wentry.pack(side=tk.LEFT,padx=5)
     g_wentry.insert(0,"1280")
     g_wentry.bind('<Return>',on_width_entry)
     g_wentry.bind('<FocusOut>',on_width_entry)
-    mk_btn(f,">>",lambda:adj_w(10)); mk_btn(f,">",lambda:adj_w(1))
+    mk_btn(f,">",lambda:adj_w(1)); mk_btn(f,">>",lambda:adj_w(10))
     # offset
     f=ttk.Frame(g_root); f.pack(side=tk.TOP,fill=tk.X,padx=5,pady=5)
     ttk.Label(f,text="Offset:").pack(side=tk.LEFT)
-    mk_btn(f,"<",lambda:adj_o(-1)); mk_btn(f,"<<",lambda:adj_o(-100))
+    mk_btn(f,"<<",lambda:adj_o(-100)); mk_btn(f,"<",lambda:adj_o(-1))
     g_off=tk.IntVar(value=0)
     g_oentry=ttk.Entry(f,width=10); g_oentry.pack(side=tk.LEFT,padx=5)
     g_oentry.insert(0,"0")
     g_oentry.bind('<Return>',on_offset_entry)
     g_oentry.bind('<FocusOut>',on_offset_entry)
-    mk_btn(f,">>",lambda:adj_o(100)); mk_btn(f,">",lambda:adj_o(1))
+    mk_btn(f,">",lambda:adj_o(1)); mk_btn(f,">>",lambda:adj_o(100))
     # canvas with scrollbars
     cf=ttk.Frame(g_root); cf.pack(padx=5,pady=5,fill=tk.BOTH,expand=True)
     g_canvas=tk.Canvas(cf,bg='black',xscrollincrement=1,yscrollincrement=1)
