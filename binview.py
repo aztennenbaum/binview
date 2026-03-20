@@ -40,6 +40,7 @@ def save_view_state(tab):
             'width': tab['width'].get(),
             'offset': tab['offset'].get(),
             'mode': tab['mode'].get(),
+            'swap_endian': tab['swap_endian'].get(),
             'autocontrast': tab['autocontrast'].get(),
             'vmin': tab['vmin'].get(),
             'vmax': tab['vmax'].get(),
@@ -66,6 +67,17 @@ def get_current_tab():
         tab_id=g_notebook.select()
         return g_tabs.get(tab_id)
     except: return None
+
+def close_current_tab():
+    """Close the currently selected tab"""
+    try:
+        tab_id=g_notebook.select()
+        if tab_id in g_tabs:
+            tab=g_tabs[tab_id]
+            save_view_state(tab)
+            del g_tabs[tab_id]
+        g_notebook.forget(tab_id)
+    except: pass
 
 def load_file(f):
     """Load file in new tab"""
@@ -121,6 +133,11 @@ def create_tab_state(parent,fname,fsize):
                     state="readonly",width=10)
     mc.pack(side=tk.LEFT,padx=5)
     mc.bind("<<ComboboxSelected>>",lambda e:reload_data(tab))
+    
+    tab['swap_endian']=tk.BooleanVar(value=False)
+    se=ttk.Checkbutton(ctrl,text="Swap Endian",variable=tab['swap_endian'],
+                       command=lambda:reload_data(tab))
+    se.pack(side=tk.LEFT,padx=(20,0))
     
     # contrast row
     ctrl2=ttk.Frame(parent); ctrl2.pack(side=tk.TOP,fill=tk.X,padx=5,pady=5)
@@ -205,6 +222,7 @@ def apply_view_state(tab,state):
         tab['width'].set(state.get('width',1280))
         tab['offset'].set(state.get('offset',0))
         tab['mode'].set(state.get('mode','Grayscale'))
+        tab['swap_endian'].set(state.get('swap_endian',False))
         tab['autocontrast'].set(state.get('autocontrast',False))
         
         dt=np.dtype(tab['depth'].get())
@@ -297,6 +315,9 @@ def read_visible_region(tab,x0,y0,x1,y1):
                     line_bytes=f.read(rw*tab['itemsize'])
                     if len(line_bytes)==rw*tab['itemsize']:
                         buf[ly,:]=np.frombuffer(line_bytes,dtype=tab['dtype'])
+        # swap endian if requested
+        if tab['swap_endian'].get() and tab['itemsize']>1:
+            buf=buf.byteswap()
         return buf
     except Exception as e:
         tab['status'].config(text=f"Read error: {e}")
@@ -334,7 +355,8 @@ def update_view(tab,*args):
         tab['canvas'].create_image(x0,y0,anchor=tk.NW,image=tab['photo'],tags="img")
         w=tab['width'].get(); o=tab['offset'].get(); a=tab['align'].get()
         ac=" [AC]" if tab['autocontrast'].get() else ""
-        tab['status'].config(text=f"{tab['imgw']}x{tab['imgh']} | view[{x0},{y0}:{x1},{y1}]{ac} | {m} | off:{o} | {tab['dtype']}({tab['itemsize']}B) | a:{a} | {os.path.basename(tab['fname'])}")
+        se=" [SE]" if tab['swap_endian'].get() else ""
+        tab['status'].config(text=f"{tab['imgw']}x{tab['imgh']} | view[{x0},{y0}:{x1},{y1}]{ac}{se} | {m} | off:{o} | {tab['dtype']}({tab['itemsize']}B) | a:{a} | {os.path.basename(tab['fname'])}")
     except Exception as e: tab['status'].config(text=f"Error: {e}")
 
 def on_scroll(tab,*args):
@@ -432,7 +454,6 @@ def stop_rep():
     global g_repeat_id,g_repeat_func
     if g_repeat_id:
         g_repeat_func=None
-        # need to get root widget
         try:
             root=tk._default_root
             if root: root.after_cancel(g_repeat_id)
@@ -464,6 +485,9 @@ def main():
     root=tk.Tk()
     root.title("Binary Image Viewer")
     root.protocol("WM_DELETE_WINDOW",lambda:on_closing(root))
+    
+    # bind Ctrl+W to close tab
+    root.bind('<Control-w>',lambda e:close_current_tab())
     
     # menu/toolbar
     toolbar=ttk.Frame(root)
