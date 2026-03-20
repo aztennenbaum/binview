@@ -25,24 +25,6 @@ Python 3, numpy, PIL/Pillow, tkinter (usually included)
 
     pip install numpy pillow
 
-## Implementation
-
-~500 lines. Line-by-line file reading - only visible region loaded into RAM. 
-View state saved as JSON keyed by filepath hash. Direct file->numpy->PIL->tkinter 
-pipeline, no intermediate buffers. Each tab maintains independent state.
-
-## Controls
-
-**Width/Offset:** Image dimensions and header skip (buttons or text entry)
-**Depth:** Data type selection
-**Align:** Byte offset for non-standard headers
-**Mode:** Grayscale or interleaved RGB
-**Auto Contrast:** Dynamic range adjustment based on visible region
-**Min/Max:** Manual contrast control - maps data values to 0-255 display range
-**Viewport:** Click-drag to pan, scrollbars for position
-
-Settings auto-save per file and restore on reopen. Each file opens in its own tab.
-
 ## Notes
 
 Native endian only. Normalization stretches data range to [0,255] for display.
