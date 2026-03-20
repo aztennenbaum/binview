@@ -1,11 +1,13 @@
 # binview
 
-Simple tool to view raw binary data as raster images. Inspired by GIMP raw 
-import but optimized for large files.
+Simple tool to view raw binary data as raster images. Load multi-gigabyte files 
+with minimal RAM. Inspired by GIMP raw import but optimized for large datasets.
 
 ## Usage
 
     ./binview.py [file1] [file2] ...
+
+Opens files in separate tabs. Ctrl+W closes current tab.
 
 ## Features
 
@@ -14,10 +16,10 @@ import but optimized for large files.
 - Tabbed interface for multiple files
 - Multiple data types: uint8/16/32/64, int8/16/32/64, float32/64
 - Grayscale and RGB (interleaved) modes
-- Auto contrast and manual contrast adjustment
 - Byte alignment control for headers
-- Interactive width/offset adjustment
-- Click-drag panning, scrollbars
+- Endian swap for big-endian data
+- Auto contrast or manual min/max range control
+- Click-drag to pan, scrollbars for large images
 
 ## Requirements
 
@@ -27,5 +29,5 @@ Python 3, numpy, PIL/Pillow, tkinter (usually included)
 
 ## Notes
 
-Native endian only. Normalization stretches data range to [0,255] for display.
-Custom min/max values persist until data type changes.
+RGB is interleaved not planar. Normalization stretches data range to [0,255] 
+for display. Settings auto-save per file and restore on reopen.
